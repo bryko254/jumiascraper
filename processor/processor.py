@@ -20,6 +20,40 @@ logging.basicConfig(
 # Load environment variables
 load_dotenv()
 
+# Database setup
+DATABASE_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@postgres:5432/jumia_db"
+engine = create_engine(DATABASE_URL)
+Base = declarative_base()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Define models
+class Product(Base):
+    __tablename__ = "products"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    current_price = Column(Float)
+    image_url = Column(String)
+    product_url = Column(String)
+    category = Column(String)
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+    price_histories = relationship("PriceHistory", back_populates="product")
+
+class PriceHistory(Base):
+    __tablename__ = "price_histories"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"))
+    price = Column(Float)
+    listed_price = Column(Float, nullable=True)
+    discount = Column(String, nullable=True)
+    recorded_at = Column(DateTime)
+    product = relationship("Product", back_populates="price_histories")
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
 def process_message(ch, method, properties, body):
     try:
         logging.info("================== NEW MESSAGE ===================")
