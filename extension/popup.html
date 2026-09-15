@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Jumia Price Monitor</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <h1>Jumia Price Monitor</h1>
+        <p id="api-status" class="muted">Checking API…</p>
+      </div>
+      <button id="open-options" class="ghost" title="Settings">Settings</button>
+    </header>
+
+    <section id="page-card" class="card hidden">
+      <p class="eyebrow" id="page-country"></p>
+      <h2 id="page-title">Product</h2>
+      <p class="price" id="page-price"></p>
+      <label class="field">
+        Alert when
+        <select id="alert-mode">
+          <option value="any_change">Price changes (up or down)</option>
+          <option value="price_down">Price goes down</option>
+          <option value="price_up">Price goes up</option>
+        </select>
+      </label>
+      <button id="watch-btn" class="primary">Watch this product</button>
+      <p id="watch-msg" class="msg"></p>
+    </section>
+
+    <section id="not-product" class="card hidden">
+      <p>Open a Jumia <strong>product</strong> page (URL ending in <code>.html</code>) to start watching it. Watches and alerts below still work from any tab.</p>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="watches">Watches</button>
+      <button class="tab" data-tab="alerts">Alerts <span id="alert-count" class="badge hidden">0</span></button>
+    </nav>
+
+    <section id="tab-watches" class="list"></section>
+    <section id="tab-alerts" class="list hidden"></section>
+
+    <script src="config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,18 +1,16 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:14
     environment:
-      POSTGRES_DB: jumia_db
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-jumia_db}
+      POSTGRES_USER: ${DB_USER:-jumia_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
     volumes:
       - jumia_postgres_data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d jumia_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-jumia_user} -d ${DB_NAME:-jumia_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,8 +19,8 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
       - "5673:5672"
       - "15673:15672"
@@ -45,42 +43,98 @@ services:
     restart: unless-stopped
 
   api:
-    build: ./api
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     ports:
       - "8001:8000"
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-jumia_user}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_NAME: ${DB_NAME:-jumia_db}
+      ENABLE_INGEST: ${ENABLE_INGEST:-true}
+      INGEST_TOKEN: ${INGEST_TOKEN:-dev-ingest-token}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - ./api:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - ./api:/app/api
+      - ./shared:/app/shared
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
     restart: unless-stopped
 
   scraper:
-    build: ./scraper
-    env_file: .env
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-jumia_user}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_NAME: ${DB_NAME:-jumia_db}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      REDIS_HOST: redis
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
     volumes:
-      - ./scraper:/app
+      - ./scraper:/app/scraper
+      - ./shared:/app/shared
     restart: unless-stopped
 
   processor:
-    build: ./processor
-    env_file: .env
+    build:
+      context: .
+      dockerfile: processor/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-jumia_user}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_NAME: ${DB_NAME:-jumia_db}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
     depends_on:
-      rabbitmq:
-        condition: service_healthy
       postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     volumes:
-      - ./processor:/app
+      - ./processor:/app/processor
+      - ./shared:/app/shared
     restart: unless-stopped
-
 
 volumes:
   jumia_postgres_data:
