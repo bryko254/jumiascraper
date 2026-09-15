@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 
 import pika
@@ -13,6 +14,8 @@ from sqlalchemy import text
 
 from shared.database import init_db, make_engine, make_session_factory, wait_for_db
 from shared.monitor import apply_scrape_result
+from shared.retention import apply_history_retention
+from shared.settings import history_retention_days, history_retention_interval_seconds
 
 load_dotenv()
 logging.basicConfig(
@@ -46,10 +49,37 @@ def process_message(ch, method, _properties, body):
         db.close()
 
 
+def run_retention_once() -> None:
+    db = SessionLocal()
+    try:
+        summary = apply_history_retention(db)
+        db.commit()
+        logger.info("Retention pass: %s", summary)
+    except Exception:
+        logger.exception("History retention failed")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def retention_loop() -> None:
+    interval = history_retention_interval_seconds()
+    logger.info(
+        "History retention thread started (raw window=%s days, every %ss)",
+        history_retention_days(),
+        interval,
+    )
+    while True:
+        time.sleep(interval)
+        run_retention_once()
+
+
 def main() -> None:
     wait_for_db(engine)
     init_db(engine)
     logger.info("Processor starting")
+    run_retention_once()
+    threading.Thread(target=retention_loop, name="history-retention", daemon=True).start()
 
     while True:
         try:

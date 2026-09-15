@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -50,6 +51,9 @@ class Product(Base):
 
 class PriceHistory(Base):
     __tablename__ = "price_histories"
+    __table_args__ = (
+        Index("ix_price_histories_product_recorded", "product_id", "recorded_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)

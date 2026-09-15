@@ -9,6 +9,9 @@ def test_health(client):
     body = response.json()
     assert body["status"] == "healthy"
     assert body["database"] == "connected"
+    assert body["storage"]["postgres"] == "primary"
+    assert body["storage"]["history_retention_days"] == 90
+    assert body["storage"]["check_interval_minutes"] == 15
 
 
 def test_countries_endpoint_lists_eight(client):
@@ -93,6 +96,37 @@ def test_ingest_requires_token(client):
         json={"product_url": KE_URL, "price": 1, "name": "x", "country": "ke"},
     )
     assert response.status_code == 401
+
+
+def test_internal_retain_downsamples(client, ingest_headers):
+    from datetime import datetime, timezone
+
+    from api.main import SessionLocal
+    from shared.models import PriceHistory
+    from shared.monitor import get_or_create_product
+
+    db = SessionLocal()
+    try:
+        product = get_or_create_product(db, KE_URL, name="Infinix")
+        db.commit()
+        day = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        for hour, price in ((8, 1), (12, 2), (20, 3)):
+            db.add(
+                PriceHistory(
+                    product_id=product.id,
+                    price=price,
+                    recorded_at=day.replace(hour=hour),
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/internal/retain", headers=ingest_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deleted"] == 2
+    assert body["kept_daily"] == 1
 
 
 def test_multi_country_watches_and_alerts(client, ingest_headers):

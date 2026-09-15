@@ -48,7 +48,7 @@ docker compose down -v
 docker compose up --build
 ```
 
-With **no watches**, the scraper idles and does not hit Jumia. After you add a watch it will HTTP-GET that product page on `SCRAPE_INTERVAL_SECONDS` (default 15 minutes).
+With **no watches**, the scraper idles and does not hit Jumia. After you add a watch it will HTTP-GET that product page every `CHECK_INTERVAL_MINUTES` (default 15; Redis TTL matches). `SCRAPE_INTERVAL_SECONDS` is a legacy fallback if the minutes knob is unset.
 
 ## Load the Chrome extension (unpacked)
 
@@ -131,9 +131,50 @@ extension/    Manifest V3 popup / options / content script
 tests/        pytest + HTML fixtures
 ```
 
-Schema uses `products.current_price` (not a separate `price` column), unique `product_url`, and upserts on every scrape. Watches are unique per `(product, alert_mode)`.
+Schema uses `products.current_price` (not a separate `price` column), unique `product_url`, and upserts on every scrape. Watches are unique per `(product, alert_mode)`. History rows are written on first observation and whenever the price changes (not on every check).
 
 Selectors try JSON-LD `Product` / `Offer` first, then Open Graph, then Jumia CSS (`h1`, `span.-b.-fs24`, `.prc`). Currency parsing is not Kenya/`KSh`-only.
+
+## Storage
+
+| Store | Role | Durability |
+| --- | --- | --- |
+| **Postgres** | Primary. `products`, `price_histories`, `watches`, `alerts`. The only source of truth the API and extension read. | Persistent volume `jumia_postgres_data` |
+| **Redis** | Short TTL cache: key `scrape:{product_url}` so the same watch is not fetched more often than `CHECK_INTERVAL_MINUTES`. | Ephemeral. Restart = cold cache (one extra scrape per URL). |
+| **RabbitMQ** | Ephemeral work queue `product_queue`. Scraper publishes parse results; processor consumes, acks, and writes Postgres. | Messages are durable until ack, then gone. Not a long-term store. Backlog exists only if the processor is down. |
+
+### Retention (`price_histories`)
+
+Default **`HISTORY_RETENTION_DAYS=90`**:
+
+1. Points newer than 90 days stay **raw** (every recorded price change).
+2. Points older than 90 days are **downsampled to one row per product per UTC day** (the last observation that day).
+3. Daily points after that are kept so charts still have a long tail; growth is ~1 row × products × days, not unbounded raw checks.
+
+The processor runs this on startup and about every hour (`HISTORY_RETENTION_INTERVAL_SECONDS`, default 3600). You can also `POST /internal/retain` with `X-Ingest-Token`. Set `HISTORY_RETENTION_DAYS=0` to disable.
+
+### Capacity (order-of-magnitude)
+
+Assumptions: polite delay ~3–5s between product fetches; history written **on change** (plus first scrape), not every check; ~0.5 KB per history row including indexes.
+
+| Watched products | Suggested `CHECK_INTERVAL_MINUTES` | Why | Postgres (typical, 1 year) | Redis | RabbitMQ |
+| --- | --- | --- | --- | --- | --- |
+| **100** | **15** | Full pass ~6 min at 3.5s/URL, so 15 min has headroom | tens of MB | < 1 MB | ephemeral; < 100 in-flight messages |
+| **1,000** | **60** | Full pass ~1 hour at 3.5s/URL; 15 min would overlap itself | hundreds of MB | < 1 MB | ephemeral; processor should stay caught up |
+| **10,000** | **360–720** (6–12 h) or more scraper workers | Serial polite scrape is ~10 hours/pass | ~1–5 GB (daily downsample after 90 days) | a few MB | ephemeral; if processor stops, queue ≈ one pass of JSON |
+
+HTTP load (not disk): checks per day ≈ `watches × 1440 / CHECK_INTERVAL_MINUTES` (100 × 96 = 9.6k GETs/day at 15 min). Jumia may rate-limit; do not drop the polite delay to “fit” 10k into 15 minutes.
+
+Worst-case disk if every check wrote a row (this stack does **not**): 100 watches × 96 checks/day × 90 raw days ≈ 0.9M rows ≈ ~0.5 GB before downsample. Real change-only history is much smaller.
+
+### Env knobs
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CHECK_INTERVAL_MINUTES` | `15` | Minimum time between scrapes of the same watched URL (Redis TTL). |
+| `SCRAPE_INTERVAL_SECONDS` | `900` | Used only if `CHECK_INTERVAL_MINUTES` is unset (`seconds / 60`). |
+| `HISTORY_RETENTION_DAYS` | `90` | Raw history window; older points collapse to daily. `0` = off. |
+| `HISTORY_RETENTION_INTERVAL_SECONDS` | `3600` | How often the processor runs retention. |
 
 ## Notes
 

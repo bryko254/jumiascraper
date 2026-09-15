@@ -25,6 +25,8 @@ from shared.database import init_db, make_engine, make_session_factory, wait_for
 from shared.models import Alert, PriceHistory, Product, Watch
 from shared.monitor import apply_scrape_result, get_or_create_product
 from shared.parser import parse_product_html
+from shared.retention import apply_history_retention
+from shared.settings import check_interval_minutes, history_retention_days
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -253,12 +255,21 @@ def health(db: Session = Depends(get_db)):
         watches = db.query(Watch).count()
         products = db.query(Product).count()
         alerts = db.query(Alert).count()
+        history_rows = db.query(PriceHistory).count()
         return {
             "status": "healthy",
             "database": "connected",
             "watches": watches,
             "products": products,
             "alerts": alerts,
+            "price_histories": history_rows,
+            "storage": {
+                "postgres": "primary",
+                "redis": "short_ttl_scrape_cache",
+                "rabbitmq": "ephemeral_queue",
+                "history_retention_days": history_retention_days(),
+                "check_interval_minutes": check_interval_minutes(),
+            },
             "message": "API is functioning normally",
         }
     except Exception as exc:
@@ -443,5 +454,16 @@ def ingest(
         summary = apply_scrape_result(db, data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return summary
+
+
+@app.post("/internal/retain")
+def retain_history(
+    db: Session = Depends(get_db),
+    _: None = Depends(require_ingest_token),
+):
+    """Downsample price_history older than HISTORY_RETENTION_DAYS (ops / tests)."""
+    summary = apply_history_retention(db)
     db.commit()
     return summary

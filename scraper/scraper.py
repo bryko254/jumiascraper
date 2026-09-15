@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, joinedload
 from shared.database import make_engine, make_session_factory, wait_for_db
 from shared.models import Watch
 from shared.parser import parse_product_html
+from shared.settings import check_interval_seconds
 
 load_dotenv()
 logging.basicConfig(
@@ -27,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger("scraper")
 
 QUEUE_NAME = os.getenv("PRODUCT_QUEUE", "product_queue")
-SCRAPE_INTERVAL = int(os.getenv("SCRAPE_INTERVAL_SECONDS", "900"))
+SCRAPE_INTERVAL = check_interval_seconds()
 CYCLE_SLEEP = int(os.getenv("SCRAPE_CYCLE_SECONDS", "30"))
 POLITE_MIN = float(os.getenv("SCRAPE_POLITE_MIN_SECONDS", "2"))
 POLITE_MAX = float(os.getenv("SCRAPE_POLITE_MAX_SECONDS", "5"))
@@ -150,7 +151,11 @@ def scrape_one(url: str) -> Optional[dict]:
 
 
 def main() -> None:
-    logger.info("Starting watch-based scraper (interval=%ss)", SCRAPE_INTERVAL)
+    logger.info(
+        "Starting watch-based scraper (check interval=%ss / %s min)",
+        SCRAPE_INTERVAL,
+        SCRAPE_INTERVAL // 60,
+    )
     engine = make_engine()
     wait_for_db(engine)
     SessionLocal = make_session_factory(engine)
