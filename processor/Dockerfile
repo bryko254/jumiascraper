@@ -1,10 +1,13 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY processor/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . .
+COPY shared /app/shared
+COPY processor /app/processor
 
-CMD ["python", "processor.py"]
+ENV PYTHONPATH=/app
+
+CMD ["python", "-m", "processor.processor"]
