@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Generator
 
@@ -12,18 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from shared.models import Base
-
-
-def database_url() -> str:
-    explicit = os.getenv("DATABASE_URL")
-    if explicit:
-        return explicit
-    user = os.getenv("DB_USER", "jumia_user")
-    password = os.getenv("DB_PASSWORD", "changeme")
-    host = os.getenv("DB_HOST", "postgres")
-    port = os.getenv("DB_PORT", "5432")
-    name = os.getenv("DB_NAME", "jumia_db")
-    return f"postgresql://{user}:{password}@{host}:{port}/{name}"
+from shared.settings import database_url, db_wait_attempts, db_wait_delay_seconds
 
 
 def make_engine(url: str | None = None) -> Engine:
@@ -40,7 +28,13 @@ def make_session_factory(engine: Engine) -> sessionmaker:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
 
-def wait_for_db(engine: Engine, attempts: int = 30, delay: float = 1.0) -> None:
+def wait_for_db(
+    engine: Engine,
+    attempts: int | None = None,
+    delay: float | None = None,
+) -> None:
+    attempts = db_wait_attempts() if attempts is None else attempts
+    delay = db_wait_delay_seconds() if delay is None else delay
     last_error = None
     for _ in range(attempts):
         try:

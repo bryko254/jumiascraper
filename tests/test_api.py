@@ -157,3 +157,25 @@ def test_multi_country_watches_and_alerts(client, ingest_headers):
     assert len(client.get("/alerts").json()) == 8
     kenya_only = client.get("/products?country=ke").json()
     assert len(kenya_only) == 1
+
+
+def test_cors_preflight_chrome_extension(client):
+    origin = "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef"
+    response = client.options(
+        "/health",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code in (200, 204)
+    allowed = response.headers.get("access-control-allow-origin")
+    assert allowed in {"*", origin}
+
+
+def test_cors_get_echoes_or_star(client):
+    origin = "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef"
+    response = client.get("/countries", headers={"Origin": origin})
+    assert response.status_code == 200
+    allowed = response.headers.get("access-control-allow-origin")
+    assert allowed in {"*", origin}

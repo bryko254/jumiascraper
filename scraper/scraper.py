@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session, joinedload
 from shared.database import make_engine, make_session_factory, wait_for_db
 from shared.models import Watch
 from shared.parser import parse_product_html
-from shared.settings import check_interval_seconds
+from shared.queue import rabbitmq_parameters
+from shared.settings import check_interval_seconds, redis_url
 
 load_dotenv()
 logging.basicConfig(
@@ -51,18 +52,7 @@ def get_headers() -> dict:
 
 
 def connect_rabbitmq():
-    credentials = pika.PlainCredentials(
-        os.getenv("RABBITMQ_USER", "guest"),
-        os.getenv("RABBITMQ_PASSWORD", "guest"),
-    )
-    parameters = pika.ConnectionParameters(
-        host=os.getenv("RABBITMQ_HOST", "rabbitmq"),
-        port=int(os.getenv("RABBITMQ_PORT", "5672")),
-        credentials=credentials,
-        heartbeat=600,
-        blocked_connection_timeout=300,
-    )
-    connection = pika.BlockingConnection(parameters)
+    connection = pika.BlockingConnection(rabbitmq_parameters())
     channel = connection.channel()
     channel.queue_declare(queue=QUEUE_NAME, durable=True)
     channel.confirm_delivery()
@@ -72,12 +62,7 @@ def connect_rabbitmq():
 
 def connect_redis() -> Optional[redis.Redis]:
     try:
-        client = redis.Redis(
-            host=os.getenv("REDIS_HOST", "redis"),
-            port=int(os.getenv("REDIS_PORT", "6379")),
-            db=0,
-            decode_responses=True,
-        )
+        client = redis.from_url(redis_url(), decode_responses=True)
         client.ping()
         logger.info("Connected to Redis")
         return client

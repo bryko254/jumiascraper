@@ -55,7 +55,9 @@ With **no watches**, the scraper idles and does not hit Jumia. After you add a w
 1. Start the API (`docker compose up`).
 2. Open `chrome://extensions`, enable **Developer mode**.
 3. **Load unpacked** and select the `extension/` folder in this repo.
-4. Open the extension **Settings** (or right-click the icon → Options) and set API base URL to `http://127.0.0.1:8001` if it is not already.
+4. Open the extension **Settings** (or right-click the icon → Options) and set API base URL:
+   - Local docker compose: `http://127.0.0.1:8001`
+   - Railway: the public HTTPS URL of the **api** service (for example `https://api-xxxx.up.railway.app`), with no trailing slash
 5. Visit a Jumia product page (URL ending in `.html`) in any of the 8 countries.
 6. Choose alert mode (**price up** / **price down** / **any change**) and click **Watch this product**.
 7. Watches and recent alerts appear in the popup. Unread alerts also show as a badge.
@@ -123,12 +125,13 @@ The smoke path is **watch → ingest first price → ingest lower price → aler
 ## Layout
 
 ```
-shared/       models, countries, price parser, HTML parser, alert logic
-api/          FastAPI
+shared/       models, countries, price parser, HTML parser, alert logic, connection settings
+api/          FastAPI + Dockerfile + railway.toml
 scraper/      polls watches, fetches product pages, publishes JSON
 processor/    consumes queue, upserts, writes history + alerts
 extension/    Manifest V3 popup / options / content script
 tests/        pytest + HTML fixtures
+railway.toml  operator pointer; per-service files under api/, scraper/, processor/
 ```
 
 Schema uses `products.current_price` (not a separate `price` column), unique `product_url`, and upserts on every scrape. Watches are unique per `(product, alert_mode)`. History rows are written on first observation and whenever the price changes (not on every check).
@@ -175,6 +178,113 @@ Worst-case disk if every check wrote a row (this stack does **not**): 100 watche
 | `SCRAPE_INTERVAL_SECONDS` | `900` | Used only if `CHECK_INTERVAL_MINUTES` is unset (`seconds / 60`). |
 | `HISTORY_RETENTION_DAYS` | `90` | Raw history window; older points collapse to daily. `0` = off. |
 | `HISTORY_RETENTION_INTERVAL_SECONDS` | `3600` | How often the processor runs retention. |
+| `DATABASE_URL` | (compose: `DB_*` → host `postgres`) | Railway Postgres plugin URL. |
+| `REDIS_URL` | (compose: host `redis`) | Railway Redis plugin URL. |
+| `RABBITMQ_URL` / `AMQP_URL` | (compose: host `rabbitmq`) | AMQP URL; else `RABBITMQ_HOST` / `USER` / `PASSWORD`. |
+| `CORS_ORIGINS` | `*` | Comma-separated browser origins. `chrome-extension://*` is always allowed. |
+| `ENABLE_INGEST` | `true` locally | Set `false` on Railway unless you need fixture ingest. |
+
+## Deploy on Railway
+
+Do **not** set a service Root Directory. `api`, `scraper`, and `processor` must build from the **repository root** so their Dockerfiles can `COPY shared/` plus the service directory. Per-service config lives in `api/railway.toml`, `scraper/railway.toml`, and `processor/railway.toml`.
+
+### 1. Project layout
+
+Create one Railway project with these services:
+
+| Service | Source | Public networking |
+| --- | --- | --- |
+| **Postgres** | Railway Postgres plugin | No |
+| **Redis** | Railway Redis plugin | No |
+| **rabbitmq** | Docker image `rabbitmq:3-management` (or `rabbitmq:3`) | No |
+| **api** | This GitHub repo | **Yes** — generate a domain (and optional custom domain) |
+| **scraper** | This GitHub repo | No |
+| **processor** | This GitHub repo | No |
+
+Private networking stays on so app services can reach plugins via `*.railway.internal`. Only **api** needs a public HTTPS URL for the Chrome extension.
+
+### 2. RabbitMQ image service
+
+Add an empty service, set source to Docker image `rabbitmq:3-management`, and do **not** generate a public domain (management UI on 15672 should stay private).
+
+On the RabbitMQ service:
+
+```
+RABBITMQ_DEFAULT_USER=<strong username>
+RABBITMQ_DEFAULT_PASS=<strong password>
+```
+
+Optional but recommended: attach a volume at `/var/lib/rabbitmq` so durable queues survive restarts.
+
+### 3. GitHub services (`api`, `scraper`, `processor`)
+
+Connect the same repo to each service. Then either:
+
+**Option A (recommended)** — Settings → Config-as-code, set the config file path:
+
+- api → `/api/railway.toml`
+- scraper → `/scraper/railway.toml`
+- processor → `/processor/railway.toml`
+
+**Option B** — service variable `RAILWAY_DOCKERFILE_PATH`:
+
+- api → `api/Dockerfile`
+- scraper → `scraper/Dockerfile`
+- processor → `processor/Dockerfile`
+
+The API listens on `$PORT` (Railway injects it; compose still uses 8000). After deploy, generate a domain on **api** only. The extension Settings field should be that origin, for example `https://api-xxxx.up.railway.app`.
+
+### 4. Variables (all three app services)
+
+Reference plugins with Railway templates (names must match your service names). Use **shared variables** for knobs that should stay in sync.
+
+```
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+REDIS_URL=${{Redis.REDIS_URL}}
+RABBITMQ_HOST=${{rabbitmq.RAILWAY_PRIVATE_DOMAIN}}
+RABBITMQ_PORT=5672
+RABBITMQ_USER=${{shared.RABBITMQ_USER}}
+RABBITMQ_PASSWORD=${{shared.RABBITMQ_PASSWORD}}
+```
+
+Or a single AMQP URL (URL-encode special characters in the password):
+
+```
+RABBITMQ_URL=amqp://user:pass@${{rabbitmq.RAILWAY_PRIVATE_DOMAIN}}:5672/
+```
+
+`DATABASE_URL` / `REDIS_URL` / `RABBITMQ_URL` (or `AMQP_URL`) override compose hostnames `postgres` / `redis` / `rabbitmq`. Discrete `DB_*`, `REDIS_HOST`, and `RABBITMQ_HOST` still work.
+
+Also set on **api**, **scraper**, and **processor** as needed:
+
+| Variable | Production suggestion |
+| --- | --- |
+| `CHECK_INTERVAL_MINUTES` | `15` (or slower; see capacity table above) |
+| `HISTORY_RETENTION_DAYS` | `90` |
+| `HISTORY_RETENTION_INTERVAL_SECONDS` | `3600` (processor) |
+| `ENABLE_INGEST` | `false` |
+| `INGEST_TOKEN` | long random token (only if ingest stays enabled) |
+| `CORS_ORIGINS` | `*` is fine for the extension; or a comma-separated list of HTTPS origins. `chrome-extension://*` is always allowed. |
+| `STARTUP_DELAY_SECONDS` | `5` (gives Postgres/RabbitMQ a moment on first boot) |
+
+Use a strong `INGEST_TOKEN` (and RabbitMQ user/password). Never commit real credentials.
+
+`api` also serves `/health` for Railway’s HTTP healthcheck (`api/railway.toml`). Scraper and processor are workers with no HTTP port.
+
+### 5. Chrome extension
+
+1. Load unpacked `extension/` (or edit `DEFAULT_API` in `extension/config.js` before packing).
+2. Open **Settings** and set **API base URL** to the Railway **api** HTTPS origin (`https://api-xxxx.up.railway.app` or your custom domain). No trailing slash.
+3. Approve the optional host permission when Chrome prompts.
+4. Confirm the popup status line shows `healthy` against that URL.
+
+### 6. Smoke check
+
+```bash
+curl -sS https://api-xxxx.up.railway.app/health
+```
+
+Expect `"status": "healthy"` and `"database": "connected"`. Add a watch from the extension; scraper logs should show a fetch, processor should upsert, and `/alerts` should populate after a price change.
 
 ## Notes
 

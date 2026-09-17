@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -26,7 +25,14 @@ from shared.models import Alert, PriceHistory, Product, Watch
 from shared.monitor import apply_scrape_result, get_or_create_product
 from shared.parser import parse_product_html
 from shared.retention import apply_history_retention
-from shared.settings import check_interval_minutes, history_retention_days
+from shared.settings import (
+    check_interval_minutes,
+    cors_allow_origins,
+    cors_origin_regex,
+    history_retention_days,
+    ingest_enabled,
+    ingest_token,
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,8 +59,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_origin_regex=r"chrome-extension://.*",
+    allow_origins=cors_allow_origins(),
+    allow_origin_regex=cors_origin_regex(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -224,14 +230,10 @@ def serialize_history(h: PriceHistory) -> dict:
     }
 
 
-def ingest_enabled() -> bool:
-    return os.getenv("ENABLE_INGEST", "true").lower() in {"1", "true", "yes"}
-
-
 def require_ingest_token(x_ingest_token: Optional[str] = Header(default=None)) -> None:
     if not ingest_enabled():
         raise HTTPException(status_code=403, detail="Fixture ingest is disabled")
-    expected = os.getenv("INGEST_TOKEN", "dev-ingest-token")
+    expected = ingest_token()
     if not x_ingest_token or x_ingest_token != expected:
         raise HTTPException(status_code=401, detail="Invalid ingest token")
 

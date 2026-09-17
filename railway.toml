@@ -1,0 +1,23 @@
+# Jumia Price Monitor — Railway
+#
+# This repo is a shared monorepo. Keep each GitHub-connected service's
+# Root Directory empty so Docker builds from the repository root
+# (Dockerfiles COPY shared/ plus the service directory).
+#
+# Point Config-as-code at the per-service file (Settings → Config-as-code):
+#   api        → /api/railway.toml
+#   scraper    → /scraper/railway.toml
+#   processor  → /processor/railway.toml
+#
+# Or set RAILWAY_DOCKERFILE_PATH instead of a config-file path:
+#   api        → api/Dockerfile
+#   scraper    → scraper/Dockerfile
+#   processor  → processor/Dockerfile
+#
+# Do not generate a public domain on scraper, processor, Postgres, Redis,
+# or RabbitMQ. Only the api service should be publicly reachable.
+#
+# Full steps: README.md → "Deploy on Railway".
+
+[deploy]
+restartPolicyType = "ON_FAILURE"

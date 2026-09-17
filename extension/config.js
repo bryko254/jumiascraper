@@ -1,3 +1,7 @@
+// Default API base URL for docker compose.
+// For a packed production build, set this to your Railway public HTTPS origin
+// (Settings → Networking on the `api` service), e.g.:
+//   const DEFAULT_API = "https://api-xxxx.up.railway.app";
 const DEFAULT_API = "http://127.0.0.1:8001";
 
 async function getApiBase() {
