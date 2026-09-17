@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from shared.database import init_db, make_engine, make_session_factory, wait_for_db
 from shared.monitor import apply_scrape_result
+from shared.queue import rabbitmq_parameters
 from shared.retention import apply_history_retention
 from shared.settings import history_retention_days, history_retention_interval_seconds
 
@@ -83,18 +84,7 @@ def main() -> None:
 
     while True:
         try:
-            credentials = pika.PlainCredentials(
-                os.getenv("RABBITMQ_USER", "guest"),
-                os.getenv("RABBITMQ_PASSWORD", "guest"),
-            )
-            parameters = pika.ConnectionParameters(
-                host=os.getenv("RABBITMQ_HOST", "rabbitmq"),
-                port=int(os.getenv("RABBITMQ_PORT", "5672")),
-                credentials=credentials,
-                heartbeat=600,
-                blocked_connection_timeout=300,
-            )
-            connection = pika.BlockingConnection(parameters)
+            connection = pika.BlockingConnection(rabbitmq_parameters())
             channel = connection.channel()
             channel.queue_declare(queue=QUEUE_NAME, durable=True)
             channel.basic_qos(prefetch_count=1)

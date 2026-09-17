@@ -1,0 +1,12 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "scraper/Dockerfile"
+watchPatterns = [
+  "scraper/**",
+  "shared/**",
+  "scraper/Dockerfile",
+  "scraper/requirements.txt",
+]
+
+[deploy]
+restartPolicyType = "ON_FAILURE"

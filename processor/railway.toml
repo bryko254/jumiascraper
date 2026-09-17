@@ -1,0 +1,12 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "processor/Dockerfile"
+watchPatterns = [
+  "processor/**",
+  "shared/**",
+  "processor/Dockerfile",
+  "processor/requirements.txt",
+]
+
+[deploy]
+restartPolicyType = "ON_FAILURE"

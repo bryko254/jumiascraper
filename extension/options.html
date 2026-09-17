@@ -23,11 +23,16 @@
     <section class="card">
       <label class="field">
         API base URL
-        <input id="api-base" type="url" placeholder="http://127.0.0.1:8001" />
+        <input id="api-base" type="url" placeholder="https://api-xxxx.up.railway.app" />
       </label>
       <button id="save" class="primary">Save</button>
       <p id="msg" class="msg"></p>
-      <p class="muted">Default for docker compose is <code>http://127.0.0.1:8001</code>. If you use another host, Chrome will ask for permission to reach it.</p>
+      <p class="muted">
+        Local docker compose: <code>http://127.0.0.1:8001</code>.
+        Railway: use the <strong>api</strong> service public HTTPS URL
+        (for example <code>https://api-xxxx.up.railway.app</code>), with no trailing slash.
+        Chrome will ask for permission the first time you save a non-localhost host.
+      </p>
     </section>
     <script src="config.js"></script>
     <script src="options.js"></script>
